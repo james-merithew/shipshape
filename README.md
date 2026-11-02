@@ -4,7 +4,7 @@ This repository is a fork of [Ship](https://github.com/US-Department-of-the-Trea
 
 **Week 4: audit and improvements.** I audited the codebase across eight categories, recorded 41 distinct findings ranked by consequence ([`AUDIT_REPORT.md`](AUDIT_REPORT.md)), and traced them to five root causes ([`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md)): no automatic enforcement, claims not tied to code, silent failures, per-request work that scaled with traffic, and tenancy left to convention, and fixed against a measured baseline. Every number has a before and after under identical conditions, a regression test, and a rollback step ([`docs/improvements-week4.md`](docs/improvements-week4.md)).
 
-- Entry bundle 2,025 kB to 808.5 kB (-58%)
+- Entry bundle 2,025 kB to 808.5 kB
 - `/api/auth/me` P95 down 47-63% at 10 concurrent requests; `/api/projects` down 31-38%
 - Main-page query count 41 to 32
 - Type violations 1,208 to 882 (-27.0%)
