@@ -1,3 +1,27 @@
+## What I built on Ship
+
+This repository is a fork of [Ship](https://github.com/US-Department-of-the-Treasury/ship), the open-source project management tool from the U.S. Department of the Treasury. The original authors made Ship; the sections further down are Ship's own README. What follows is the work I added on top of it, by week. Commits appear under the author name I was using at the time.
+
+**Week 4: audit and improvements.** I audited the codebase across eight categories, recorded 41 distinct findings ranked by consequence ([`AUDIT_REPORT.md`](AUDIT_REPORT.md)), and traced them to five root causes ([`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md)): no automatic enforcement, claims not tied to code, silent failures, per-request work that scaled with traffic, and tenancy left to convention, and fixed against a measured baseline. Every number has a before and after under identical conditions, a regression test, and a rollback step ([`docs/improvements-week4.md`](docs/improvements-week4.md)).
+
+- Entry bundle 2,025 kB to 808.5 kB (-58%)
+- `/api/auth/me` P95 down 47-63% at 10 concurrent requests; `/api/projects` down 31-38%
+- Main-page query count 41 to 32
+- Type violations 1,208 to 882 (-27.0%)
+- Migrations that failed silently with exit 0 now fail loudly, and a transient network error no longer logs the user out
+
+**Week 5: FleetGraph.** A LangGraph agent that watches project health: stale issues, stuck reviews, slipping weeks. Deterministic detectors run first and the LLM only sees findings, so a healthy project costs no tokens. Approvals go through a human-in-the-loop gate. Code is in [`api/src/fleetgraph/`](api/src/fleetgraph/); design in [`FLEETGRAPH.md`](FLEETGRAPH.md) and [`docs/defense-week5-fleetgraph.md`](docs/defense-week5-fleetgraph.md).
+
+**Week 6: platform API.** A public, versioned API on top of Ship ([`docs/week6-requirements.md`](docs/week6-requirements.md), 1,265 tests across five suites at the last count):
+
+- OAuth 2.0 authorization server: authorization code with PKCE, device grant, and refresh-token rotation where reuse revokes the whole token family ([`api/src/platform/oauth/`](api/src/platform/oauth/))
+- `/api/v1` resource routes with a scope registry and a generated OpenAPI 3.1 spec ([`docs/openapi.json`](docs/openapi.json))
+- Webhooks delivered from an outbox with signed payloads, retries, and replay ([`api/src/platform/webhooks/`](api/src/platform/webhooks/))
+- A typed TypeScript SDK ([`sdk/`](sdk/)) and a CLI ([`integrations/cli/`](integrations/cli/)), plus a developer portal ([`web/src/pages/devportal/`](web/src/pages/devportal/))
+- Architecture and decisions: [`docs/defense-week6.md`](docs/defense-week6.md) and [`DECISIONS.md`](DECISIONS.md)
+
+---
+
 <p align="center">
   <a href="https://github.com/US-Department-of-the-Treasury/ship">
     <img src="web/public/icons/blue/android-chrome-512x512.png" alt="Ship logo" width="120">
@@ -19,83 +43,19 @@
 
 ---
 
-## For graders — the Ship platform API
+## The Ship platform API
 
-Ship exposes a versioned public API, an OAuth 2.0 authorization server, and a typed SDK.
+Ship exposes a versioned public API, an OAuth 2.0 authorization server, and a typed SDK. The deployed instance is not currently hosted, so the way to try it is to run it locally.
 
 | | |
 | --- | --- |
-| Deployed instance | `https://ship-api-r1om.onrender.com` |
-| OpenAPI 3.1 spec (live, generated from the routes) | `/api/v1/openapi.json` |
-| OpenAPI 3.1 spec (static copy) | [`docs/openapi.json`](docs/openapi.json) |
+| OpenAPI 3.1 spec (generated from the routes) | [`docs/openapi.json`](docs/openapi.json) |
 | Requirement → evidence ledger | [`docs/week6-requirements.md`](docs/week6-requirements.md) |
 | Architecture + decisions | [`docs/defense-week6.md`](docs/defense-week6.md) · [`DECISIONS.md`](DECISIONS.md) |
 
-### Grader credentials
+`pnpm --filter @ship/api seed:grader-app` registers an OAuth app with read-only scopes (`documents:read`, `issues:read`, `sprints:read`). It prints the client secret exactly once and rotates it on re-run.
 
-A pre-registered OAuth app with **read-only** scopes (`documents:read`, `issues:read`,
-`sprints:read` — it cannot modify anything) is seeded on the deployed instance by
-`pnpm --filter @ship/api seed:grader-app`. That script prints the client secret exactly once and
-rotates it on re-run, so the value published here is always the working one.
-
-<!-- GRADER_CREDENTIALS_START -->
-| | |
-| --- | --- |
-| `client_id` | `ship_app_e46d52564bc1f690` |
-| `client_secret` | `ship_sec_bd48273402dbb7560d7a8f47d7cea4c95b0836743e108117ca9ef6adf88f9e80` |
-| scopes | `documents:read` `issues:read` `sprints:read` (read-only) |
-| redirect URIs | `http://localhost:8976/callback`, `http://127.0.0.1:8976/callback` |
-| demo account for the approval step | `demo@ship.local` / `demo1234` |
-
-**Device flow, end to end** (verified working against the deployed instance;
-the `ship login` CLI will automate exactly these calls once it ships):
-
-```bash
-BASE=https://ship-api-r1om.onrender.com
-CLIENT=ship_app_e46d52564bc1f690
-
-# 1. ask for a device code
-curl -s -X POST $BASE/oauth/device/code -H 'Content-Type: application/json'   -d "{\"client_id\":\"$CLIENT\",\"scope\":\"documents:read issues:read\"}"
-
-# 2. approve the printed user_code while signed in as the demo account,
-#    then exchange the device_code for a token
-curl -s -X POST $BASE/oauth/token   -d grant_type=urn:ietf:params:oauth:grant-type:device_code   -d device_code=<device_code> -d client_id=$CLIENT
-
-# 3. use it
-curl -s $BASE/api/v1/me -H "Authorization: Bearer <access_token>"
-```
-
-Polling before approval returns `authorization_pending`; polling again inside
-the interval returns `slow_down`. Requesting a scope the app was not granted
-returns `403` naming the missing scope, e.g. `GET /api/v1/sprints` →
-`{"code":"forbidden","message":"Insufficient scope: this request requires 'sprints:read'","details":{"missing_scope":"sprints:read"}}`.
-<!-- GRADER_CREDENTIALS_END -->
-
-### Try it against the deployed instance
-
-The `@ship/sdk` package and the `ship` CLI are in the repo but **not yet
-published or packaged** — the CLI lands with the reference-integration slice.
-Until then this is the verified path, and it needs nothing but `curl`:
-
-```bash
-BASE=https://ship-api-r1om.onrender.com
-
-# the public contract, no auth required
-curl -s $BASE/api/v1/openapi.json | head
-
-# authenticate with the grader app (device flow — see the credentials above)
-curl -s -X POST $BASE/oauth/device/code -H 'Content-Type: application/json'   -d '{"client_id":"ship_app_e46d52564bc1f690","scope":"documents:read issues:read"}'
-
-# approve the printed user_code as demo@ship.local, then exchange it
-curl -s -X POST $BASE/oauth/token   -d grant_type=urn:ietf:params:oauth:grant-type:device_code   -d device_code=<device_code> -d client_id=ship_app_e46d52564bc1f690
-
-# use the token
-curl -s $BASE/api/v1/me -H "Authorization: Bearer <access_token>"
-```
-
-Every public failure returns the same envelope — `{code, message, details?, request_id}` — and
-`request_id` matches the `X-Request-Id` header, so one id correlates a client-side error with the
-server's audit trail.
+Every public failure returns the same envelope, `{code, message, details?, request_id}`, and `request_id` matches the `X-Request-Id` header, so one id connects a client-side error to the server's audit trail. Requesting a scope the app was not granted returns `403` naming the missing scope.
 
 ---
 
@@ -194,7 +154,7 @@ Once it's running, open your browser to:
 
 Log in with the demo account:
 - **Email:** `dev@ship.local`
-- **Password:** `admin123`
+- **Password:** printed by the seed script when it runs (see `api/src/db/seed.ts`)
 
 ### What's Running
 
